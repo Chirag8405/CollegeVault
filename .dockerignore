@@ -1,0 +1,101 @@
+# Docker ignore file for College Vault
+# Developed by Chirag Poornamath
+
+# Dependencies
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Production build
+dist
+
+# Environment files
+.env
+.env.local
+.env.development
+.env.test
+.env.staging
+.env.production
+
+# IDE files
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# Testing
+coverage
+.nyc_output
+*.lcov
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Database files (will be created in container)
+data/
+*.db
+*.sqlite
+
+# Temporary files
+tmp/
+temp/
+.cache
+
+# Documentation (except production guides)
+*.md
+!PRODUCTION_DEPLOYMENT.md
+!NETLIFY_DEVOPS_DEPLOYMENT.md
+
+# Development tools
+.eslintrc*
+.prettierrc*
+jest.config.js
+vitest.config.ts
+
+# Docker files themselves
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# CI/CD files
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+
+# Package manager files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Backup files
+*.backup
+*.bak
+*.old
+
+# Local uploads (will be handled by volumes)
+uploads/
+backups/
+
+# SSL certificates
+*.pem
+*.key
+*.crt
+
+# Monitoring configs
+monitoring/
+grafana/
+prometheus/

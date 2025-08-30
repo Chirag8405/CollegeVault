@@ -1,0 +1,230 @@
+# GitHub Actions CI/CD Pipeline for College Vault
+# Developed by Chirag Poornamath
+
+name: Deploy to Netlify with Docker
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  NODE_VERSION: '18'
+  DOCKER_REGISTRY: 'docker.io'
+  IMAGE_NAME: 'chiragpoornamath/college-document-vault'
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📦 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 🟢 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        
+    - name: 📥 Install dependencies
+      run: npm ci
+      
+    - name: 🔍 Run type checking
+      run: npm run typecheck
+      
+    - name: 🧪 Run tests
+      run: npm test
+      
+    - name: 🔒 Run security audit
+      run: npm audit --audit-level=moderate
+      
+    - name: 🎨 Check code format
+      run: npm run format.fix --check
+
+  build-docker:
+    name: Build Docker Image
+    needs: test
+    runs-on: ubuntu-latest
+    
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    
+    steps:
+    - name: 📦 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 🐳 Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: 🔑 Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+        
+    - name: 🏷️ Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+          
+    - name: 🔨 Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
+
+  security-scan:
+    name: Security Scan
+    needs: build-docker
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 🔍 Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ needs.build-docker.outputs.image-tag }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        
+    - name: 📤 Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  deploy-staging:
+    name: Deploy to Staging
+    if: github.event_name == 'pull_request'
+    needs: [test, build-docker]
+    runs-on: ubuntu-latest
+    environment: staging
+    
+    steps:
+    - name: 📦 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 🟢 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        
+    - name: 🌐 Install Netlify CLI
+      run: npm install -g netlify-cli@latest
+      
+    - name: 🔨 Build application
+      run: npm ci && npm run build
+      env:
+        NODE_ENV: staging
+        
+    - name: 🚀 Deploy to Netlify (Preview)
+      run: |
+        netlify deploy \
+          --dir=dist/spa \
+          --functions=netlify/functions \
+          --site=${{ secrets.NETLIFY_SITE_ID }} \
+          --auth=${{ secrets.NETLIFY_AUTH_TOKEN }} \
+          --message="Deploy preview for PR #${{ github.event.number }}" \
+          --alias=pr-${{ github.event.number }}
+          
+    - name: 💬 Comment PR
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: '🚀 Preview deployment ready at: https://pr-${{ github.event.number }}--college-document-vault.netlify.app'
+          })
+
+  deploy-production:
+    name: Deploy to Production
+    if: github.ref == 'refs/heads/main'
+    needs: [test, build-docker, security-scan]
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+    - name: 📦 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 🟢 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        
+    - name: 🌐 Install Netlify CLI
+      run: npm install -g netlify-cli@latest
+      
+    - name: 🔨 Build application
+      run: npm ci && npm run build
+      env:
+        NODE_ENV: production
+        
+    - name: 🚀 Deploy to Netlify (Production)
+      run: |
+        netlify deploy \
+          --prod \
+          --dir=dist/spa \
+          --functions=netlify/functions \
+          --site=${{ secrets.NETLIFY_SITE_ID }} \
+          --auth=${{ secrets.NETLIFY_AUTH_TOKEN }} \
+          --message="Production deployment ${{ github.sha }}"
+          
+    - name: 🏥 Health Check
+      run: |
+        sleep 30
+        curl -f ${{ secrets.PRODUCTION_URL }}/api/health || exit 1
+        
+    - name: 📊 Performance Test
+      run: |
+        npx lighthouse ${{ secrets.PRODUCTION_URL }} --output=json --output-path=./lighthouse-results.json --chrome-flags="--headless"
+        cat ./lighthouse-results.json | jq '.categories.performance.score * 100' > performance-score.txt
+        echo "Performance Score: $(cat performance-score.txt)"
+        
+    - name: 📈 Upload Performance Results
+      uses: actions/upload-artifact@v3
+      with:
+        name: lighthouse-results
+        path: |
+          lighthouse-results.json
+          performance-score.txt
+          
+    - name: 🔔 Notify deployment success
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        text: "🚀 College Vault deployed successfully to production!\n🌐 URL: ${{ secrets.PRODUCTION_URL }}\n📊 Performance Score: $(cat performance-score.txt)%"
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  cleanup:
+    name: Cleanup
+    if: always()
+    needs: [deploy-staging, deploy-production]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 🧹 Cleanup old Docker images
+      run: |
+        # Keep only the latest 5 images
+        docker images ${{ env.IMAGE_NAME }} --format "table {{.Repository}}:{{.Tag}}\t{{.CreatedAt}}" | \
+        tail -n +2 | sort -k2 -r | tail -n +6 | awk '{print $1}' | \
+        xargs -r docker rmi || true
