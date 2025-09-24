@@ -19,7 +19,7 @@ A secure, production-ready document management system designed specifically for 
 
 ### 🔒 Security Features
 - Password verification before document access
-- OTP sent to registered email and phone
+- OTP sent to registered email and phone (optional)
 - Database encryption and secure storage
 - Session management and timeout
 
